@@ -4,7 +4,7 @@ import {Player} from '@remotion/player';
 import {VideoFromPlan} from '@/remotion/VideoFromPlan';
 import {planDurationInFrames, type Plan} from '@/remotion/plan';
 type VoiceResult = {id: string; audioUrl: string; audioSec: number};
-
+type ImageResult = {id: string; imageUrl: string};
 export default function Home() {
   const [idea, setIdea] = useState('');
   const [audience, setAudience] = useState('');
@@ -12,6 +12,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [voicing, setVoicing] = useState(false);
+  const [imaging, setImaging] = useState(false);
 
   async function create() {
     setLoading(true);
@@ -58,6 +59,26 @@ async function addVoice() {
     setVoicing(false);
   }
 }
+async function addImages() {
+  if (!plan) return;
+  setImaging(true);
+  setError('');
+  try {
+    const res = await fetch('/api/images', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scenes: plan.scenes.map((s) => ({id: s.id, visualIdea: s.visualIdea}))}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+    const byId = new Map((data.scenes as ImageResult[]).map((s) => [s.id, s.imageUrl] as const));
+    setPlan((p) => (p ? {...p, scenes: p.scenes.map((s) => ({...s, imageUrl: byId.get(s.id) ?? s.imageUrl}))} : p));
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Something went wrong.');
+  } finally {
+    setImaging(false);
+  }
+}
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-3xl font-bold">Imanovera</h1>
@@ -82,6 +103,13 @@ async function addVoice() {
         onClick={create}
       >
         {loading ? 'Planning your video…' : 'Create my plan'}
+      </button>
+      <button
+        className="ml-3 mt-3 rounded bg-purple-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
+        disabled={imaging}
+        onClick={addImages}
+      >
+        {imaging ? 'Drawing pictures…' : 'Add pictures'}
       </button>
 
       {error && <p className="mt-4 text-red-600">{error}</p>}

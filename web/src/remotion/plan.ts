@@ -7,6 +7,7 @@ export type Scene = {
   background: string;
   textColor: string;
   audioUrl?: string;
+  imageUrl?: string;
 };
 
 export type Plan = {
