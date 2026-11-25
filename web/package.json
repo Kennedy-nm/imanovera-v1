@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.13.0",
+    "@remotion/bundler": "4.0.547",
     "@remotion/player": "^4.0.547",
+    "@remotion/renderer": "4.0.547",
     "music-metadata": "^12.8.4",
     "next": "16.4.6",
     "openai": "^7.64.0",

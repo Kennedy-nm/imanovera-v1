@@ -13,6 +13,8 @@ export default function Home() {
   const [error, setError] = useState('');
   const [voicing, setVoicing] = useState(false);
   const [imaging, setImaging] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [videoUrl, setVideoUrl] = useState('');
 
   async function create() {
     setLoading(true);
@@ -79,6 +81,26 @@ async function addImages() {
     setImaging(false);
   }
 }
+async function exportVideo() {
+  if (!plan) return;
+  setExporting(true);
+  setError('');
+  setVideoUrl('');
+  try {
+    const res = await fetch('/api/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({plan}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+    setVideoUrl(data.videoUrl);
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Something went wrong.');
+  } finally {
+    setExporting(false);
+  }
+}
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-3xl font-bold">Imanovera</h1>
@@ -111,7 +133,20 @@ async function addImages() {
       >
         {imaging ? 'Drawing pictures…' : 'Add pictures'}
       </button>
-
+        <button
+          className="ml-3 mt-3 rounded bg-orange-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
+          disabled={exporting}
+          onClick={exportVideo}
+        >
+          {exporting ? 'Exporting video… (about a minute)' : 'Export MP4'}
+        </button>
+        {videoUrl && (
+          <p className="mt-3">
+            <a className="font-semibold text-blue-700 underline" href={videoUrl} download>
+              Download your video
+            </a>
+          </p>
+)}
       {error && <p className="mt-4 text-red-600">{error}</p>}
 
       {plan && (
