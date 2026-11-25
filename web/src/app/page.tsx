@@ -1,8 +1,9 @@
 'use client';
 import {useState} from 'react';
-
-type Scene = {id: string; title: string; narration: string; durationSec: number; visualIdea: string};
-type Plan = {title: string; scenes: Scene[]};
+import {Player} from '@remotion/player';
+import {VideoFromPlan} from '@/remotion/VideoFromPlan';
+import {planDurationInFrames, type Plan} from '@/remotion/plan';
+type VoiceResult = {id: string; audioUrl: string; audioSec: number};
 
 export default function Home() {
   const [idea, setIdea] = useState('');
@@ -10,6 +11,7 @@ export default function Home() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [voicing, setVoicing] = useState(false);
 
   async function create() {
     setLoading(true);
@@ -30,7 +32,32 @@ export default function Home() {
       setLoading(false);
     }
   }
-
+async function addVoice() {
+  if (!plan) return;
+  setVoicing(true);
+  setError('');
+  try {
+    const res = await fetch('/api/voice', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scenes: plan.scenes.map((s) => ({id: s.id, narration: s.narration}))}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+    const byId = new Map((data.scenes as VoiceResult[]).map((s) => [s.id, s] as const));
+    setPlan({
+      ...plan,
+      scenes: plan.scenes.map((s) => {
+        const a = byId.get(s.id);
+        return a ? {...s, audioUrl: a.audioUrl, durationSec: Math.ceil((a.audioSec + 0.8) * 10) / 10} : s;
+      }),
+    });
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Something went wrong.');
+  } finally {
+    setVoicing(false);
+  }
+}
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-3xl font-bold">Imanovera</h1>
@@ -62,6 +89,23 @@ export default function Home() {
       {plan && (
         <section className="mt-8">
           <h2 className="text-2xl font-semibold">{plan.title}</h2>
+          <Player
+            component={VideoFromPlan}
+            inputProps={{plan}}
+            durationInFrames={planDurationInFrames(plan)}
+            fps={plan.fps}
+            compositionWidth={plan.width}
+            compositionHeight={plan.height}
+            controls
+            style={{width: '100%', marginTop: 16, borderRadius: 12}}
+          />
+          <button
+            className="mt-3 rounded bg-green-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
+            disabled={voicing}
+            onClick={addVoice}
+          >
+            {voicing ? 'Recording narration…' : 'Add narration'}
+          </button>
           <ol className="mt-4 space-y-3">
             {plan.scenes.map((s, i) => (
               <li key={s.id} className="rounded border p-4">
