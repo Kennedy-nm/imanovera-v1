@@ -3,9 +3,17 @@ import {useState} from 'react';
 import {Player} from '@remotion/player';
 import {VideoFromPlan} from '@/remotion/VideoFromPlan';
 import {planDurationInFrames, type Plan} from '@/remotion/plan';
+import {useRouter} from 'next/navigation';
+import {createClient} from '@/lib/supabase/client';
 type VoiceResult = {id: string; audioUrl: string; audioSec: number};
 type ImageResult = {id: string; imageUrl: string};
 export default function Home() {
+  const router = useRouter();
+async function signOut() {
+  await createClient().auth.signOut();
+  router.push('/login');
+  router.refresh();
+}
   const [idea, setIdea] = useState('');
   const [audience, setAudience] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -104,6 +112,9 @@ async function exportVideo() {
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-3xl font-bold">Imanovera</h1>
+      <button className="text-sm text-gray-600 underline" onClick={signOut}>
+  Sign out
+</button>
       <p className="mt-1 text-gray-600">Tell me your video idea and I will plan it with you.</p>
 
       <textarea
