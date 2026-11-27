@@ -1,12 +1,7 @@
 import {NextResponse} from 'next/server';
 import {z} from 'zod';
-import {spawn} from 'node:child_process';
-import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import {randomUUID} from 'node:crypto';
 import {createClient} from '@/lib/supabase/server';
-import {signPaths} from '@/lib/media';
+import {processQueue} from '@/lib/renderQueue';
 
 const mediaPath = z.string().regex(/^[0-9a-f-]{36}\/(audio|images)\/[0-9a-f-]{36}\.(mp3|jpg)$/);
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -36,76 +31,57 @@ const Input = z.object({
   }),
 });
 
-let rendering = false;
-
-function runRender(propsFile: string, outFile: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(process.cwd(), 'scripts', 'render.mjs'), propsFile, outFile], {
-      cwd: process.cwd(),
-    });
-    let log = '';
-    child.stdout.on('data', (d) => {
-      log += d;
-      process.stdout.write(d);
-    });
-    child.stderr.on('data', (d) => {
-      log += d;
-      process.stderr.write(d);
-    });
-    const timer = setTimeout(() => child.kill(), 20 * 60 * 1000);
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`Render failed (code ${code}): ${log.slice(-1500)}`));
-    });
-  });
-}
-
 export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({error: 'The video plan is not valid.'}, {status: 400});
   }
-  if (rendering) {
-    return NextResponse.json({error: 'Another video is being exported. Please try again in a minute.'}, {status: 429});
+
+  const supabase = await createClient();
+  const {data: auth} = await supabase.auth.getUser();
+  const user = auth.user;
+  if (!user) return NextResponse.json({error: 'Please sign in.'}, {status: 401});
+
+  // Users may only export their own files.
+  const paths = parsed.data.plan.scenes.flatMap((s) => [s.audioPath, s.imagePath]).filter(Boolean) as string[];
+  if (paths.some((p) => !p.startsWith(`${user.id}/`))) {
+    return NextResponse.json({error: 'Some media in this video is not available.'}, {status: 400});
   }
 
+  // One export at a time per user.
+  const {data: active} = await supabase
+    .from('render_jobs')
+    .select('id')
+    .in('status', ['queued', 'rendering'])
+    .limit(1);
+  if (active && active.length > 0) {
+    return NextResponse.json({error: 'You already have an export in progress.'}, {status: 429});
+  }
+
+  const {data: job, error} = await supabase
+    .from('render_jobs')
+    .insert({plan: parsed.data.plan, status: 'queued', progress: 0})
+    .select('id')
+    .single();
+  if (error || !job) {
+    console.error(error);
+    return NextResponse.json({error: 'Could not start the export. Please try again.'}, {status: 500});
+  }
+
+  void processQueue();
+  return NextResponse.json({jobId: job.id});
+}
+
+export async function GET() {
   const supabase = await createClient();
   const {data: auth} = await supabase.auth.getUser();
   if (!auth.user) return NextResponse.json({error: 'Please sign in.'}, {status: 401});
 
-  rendering = true;
-  try {
-    const scenes = parsed.data.plan.scenes;
-    const wanted = scenes.flatMap((s) => [s.audioPath, s.imagePath]).filter((p): p is string => Boolean(p));
-    const urls = await signPaths(supabase, wanted, 3600);
-    if (wanted.some((p) => !urls.has(p))) {
-      return NextResponse.json({error: 'Some pictures or narration for this video are not available.'}, {status: 400});
-    }
-
-    const plan = {
-      ...parsed.data.plan,
-      scenes: scenes.map((s) => ({
-        ...s,
-        audioUrl: s.audioPath ? urls.get(s.audioPath) : undefined,
-        imageUrl: s.imagePath ? urls.get(s.imagePath) : undefined,
-      })),
-    };
-
-    const tmp = await mkdtemp(path.join(os.tmpdir(), 'imanovera-'));
-    const propsFile = path.join(tmp, 'props.json');
-    await writeFile(propsFile, JSON.stringify({plan}));
-
-    const videosDir = path.join(process.cwd(), 'public', 'generated');
-    await mkdir(videosDir, {recursive: true});
-    const name = `${randomUUID()}.mp4`;
-    await runRender(propsFile, path.join(videosDir, name));
-
-    return NextResponse.json({videoUrl: `/generated/${name}`});
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({error: 'Could not export the video right now. Please try again.'}, {status: 500});
-  } finally {
-    rendering = false;
-  }
+  const {data} = await supabase
+    .from('render_jobs')
+    .select('id,status,progress')
+    .in('status', ['queued', 'rendering'])
+    .order('created_at', {ascending: false})
+    .limit(1);
+  return NextResponse.json({job: data?.[0] ?? null});
 }

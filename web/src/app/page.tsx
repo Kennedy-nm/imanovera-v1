@@ -9,6 +9,9 @@ import {planDurationInFrames, type Plan} from '@/remotion/plan';
 type VoiceResult = {id: string; audioPath: string; audioUrl: string; audioSec: number};
 type ImageResult = {id: string; imagePath: string; imageUrl: string};
 type EpisodeRow = {id: string; title: string; updated_at: string};
+type JobStatus = 'queued' | 'rendering' | 'done' | 'failed';
+type ExportState = {status: JobStatus; progress: number};
+type ExportPoll = ExportState & {error?: string | null; videoUrl?: string};
 
 async function callApi<T>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(
@@ -34,10 +37,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [voicing, setVoicing] = useState(false);
   const [imaging, setImaging] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [job, setJob] = useState<ExportState | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [error, setError] = useState('');
 
+  const exporting = starting || job?.status === 'queued' || job?.status === 'rendering';
   const busy = loading || voicing || imaging || exporting;
 
   const refreshList = useCallback(async () => {
@@ -51,7 +57,54 @@ export default function Home() {
 
   useEffect(() => {
     void refreshList();
+    // If an export is still running (for example after a page reload), pick it up again.
+    void (async () => {
+      try {
+        const d = await callApi<{job: {id: string; status: JobStatus; progress: number} | null}>('/api/export');
+        if (d.job) {
+          setJobId(d.job.id);
+          setJob({status: d.job.status, progress: d.job.progress});
+        }
+      } catch {
+        // Nothing to resume.
+      }
+    })();
   }, [refreshList]);
+
+  // Check on the export every two seconds until it finishes.
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    let fails = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      try {
+        const s = await callApi<ExportPoll>(`/api/export/${jobId}`);
+        if (cancelled) return;
+        fails = 0;
+        setJob({status: s.status, progress: s.progress});
+        if (s.status === 'done') {
+          setVideoUrl(s.videoUrl ?? '');
+          return;
+        }
+        if (s.status === 'failed') {
+          setError(s.error || 'Could not export the video. Please try again.');
+          return;
+        }
+      } catch {
+        fails += 1;
+        if (fails >= 5) return;
+      }
+      if (!cancelled) timer = setTimeout(poll, 2000);
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [jobId]);
 
   async function signOut() {
     await createClient().auth.signOut();
@@ -170,16 +223,17 @@ export default function Home() {
 
   async function exportVideo() {
     if (!plan) return;
-    setExporting(true);
+    setStarting(true);
     setError('');
     setVideoUrl('');
     try {
-      const data = await callApi<{videoUrl: string}>('/api/export', {plan});
-      setVideoUrl(data.videoUrl);
+      const data = await callApi<{jobId: string}>('/api/export', {plan});
+      setJob({status: 'queued', progress: 0});
+      setJobId(data.jobId);
     } catch (e) {
       setError(message(e));
     } finally {
-      setExporting(false);
+      setStarting(false);
     }
   }
 
@@ -233,6 +287,18 @@ export default function Home() {
 
       {error && <p className="mt-4 text-red-600">{error}</p>}
 
+      {exporting && (
+        <div className="mt-4">
+          <div className="h-3 w-full overflow-hidden rounded bg-gray-200">
+            <div className="h-3 bg-orange-600 transition-all" style={{width: `${job?.progress ?? 0}%`}} />
+          </div>
+          <p className="mt-1 text-sm text-gray-600">
+            {job?.status === 'rendering' ? `Exporting… ${job.progress}%` : 'Getting ready to export…'} You can close
+            this page and come back; the export keeps going.
+          </p>
+        </div>
+      )}
+
       {plan && (
         <section className="mt-8">
           <h2 className="text-2xl font-semibold">{plan.title}</h2>
@@ -266,7 +332,7 @@ export default function Home() {
             disabled={busy}
             onClick={exportVideo}
           >
-            {exporting ? 'Exporting video… (several minutes)' : 'Export MP4'}
+            {exporting ? 'Exporting…' : 'Export MP4'}
           </button>
           {videoUrl && (
             <p className="mt-3">
