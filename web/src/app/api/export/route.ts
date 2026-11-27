@@ -5,8 +5,10 @@ import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {createClient} from '@/lib/supabase/server';
+import {signPaths} from '@/lib/media';
 
-const mediaUrl = z.string().regex(/^\/generated\/[A-Za-z0-9-]+\.(mp3|jpg)$/);
+const mediaPath = z.string().regex(/^[0-9a-f-]{36}\/(audio|images)\/[0-9a-f-]{36}\.(mp3|jpg)$/);
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
 const Input = z.object({
@@ -25,8 +27,8 @@ const Input = z.object({
           visualIdea: z.string().max(400),
           background: hex,
           textColor: hex,
-          audioUrl: mediaUrl.optional(),
-          imageUrl: mediaUrl.optional(),
+          audioPath: mediaPath.optional(),
+          imagePath: mediaPath.optional(),
         }),
       )
       .min(1)
@@ -42,8 +44,14 @@ function runRender(propsFile: string, outFile: string): Promise<void> {
       cwd: process.cwd(),
     });
     let log = '';
-    child.stdout.on('data', (d) => (log += d));
-    child.stderr.on('data', (d) => (log += d));
+    child.stdout.on('data', (d) => {
+      log += d;
+      process.stdout.write(d);
+    });
+    child.stderr.on('data', (d) => {
+      log += d;
+      process.stderr.write(d);
+    });
     const timer = setTimeout(() => child.kill(), 20 * 60 * 1000);
     child.on('close', (code) => {
       clearTimeout(timer);
@@ -62,15 +70,25 @@ export async function POST(req: Request) {
     return NextResponse.json({error: 'Another video is being exported. Please try again in a minute.'}, {status: 429});
   }
 
+  const supabase = await createClient();
+  const {data: auth} = await supabase.auth.getUser();
+  if (!auth.user) return NextResponse.json({error: 'Please sign in.'}, {status: 401});
+
   rendering = true;
   try {
-    const origin = new URL(req.url).origin;
+    const scenes = parsed.data.plan.scenes;
+    const wanted = scenes.flatMap((s) => [s.audioPath, s.imagePath]).filter((p): p is string => Boolean(p));
+    const urls = await signPaths(supabase, wanted, 3600);
+    if (wanted.some((p) => !urls.has(p))) {
+      return NextResponse.json({error: 'Some pictures or narration for this video are not available.'}, {status: 400});
+    }
+
     const plan = {
       ...parsed.data.plan,
-      scenes: parsed.data.plan.scenes.map((s) => ({
+      scenes: scenes.map((s) => ({
         ...s,
-        audioUrl: s.audioUrl ? origin + s.audioUrl : undefined,
-        imageUrl: s.imageUrl ? origin + s.imageUrl : undefined,
+        audioUrl: s.audioPath ? urls.get(s.audioPath) : undefined,
+        imageUrl: s.imagePath ? urls.get(s.imagePath) : undefined,
       })),
     };
 

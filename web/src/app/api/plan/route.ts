@@ -48,7 +48,8 @@ export async function POST(req: Request) {
         'You plan short explainer videos for people who are not video experts. ' +
         'Always respond by calling the save_plan tool exactly once, and write nothing else. ' +
         'Create a clear, accurate, engaging plan of 5 to 8 scenes. Never invent statistics or facts. ' +
-        'Write narration in plain English suited to the audience, 1 to 3 short sentences per scene.',
+        'Write narration in plain English suited to the audience, 1 to 3 short sentences per scene. ' +
+        'Picture ideas must be friendly and safe for all ages: avoid blood, injuries, close-up anatomy, weapons, banknotes, real people and real brands. Show ideas with simple diagrams, objects, scenery or cartoon characters instead.',
         tools: [
         {
           name: 'save_plan',

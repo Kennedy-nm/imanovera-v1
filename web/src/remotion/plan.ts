@@ -6,6 +6,10 @@ export type Scene = {
   visualIdea: string;
   background: string;
   textColor: string;
+  // Saved in the database:
+  audioPath?: string;
+  imagePath?: string;
+  // Temporary signed links, never saved:
   audioUrl?: string;
   imageUrl?: string;
 };
