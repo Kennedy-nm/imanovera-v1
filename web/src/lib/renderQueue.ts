@@ -1,16 +1,17 @@
+// 6a renderQueue.ts
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {spawn} from 'node:child_process';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createAdminClient} from '@/lib/supabase/admin';
-import {signPaths} from '@/lib/media';
+import {collectPaths, signPaths, signPlan} from '@/lib/media';
 
 type QueueState = {running: boolean; started: boolean};
 const g = globalThis as unknown as {__renderQueue?: QueueState};
 const state: QueueState = (g.__renderQueue ??= {running: false, started: false});
 
-type Job = {id: string; owner_id: string; plan: {scenes: {audioPath?: string; imagePath?: string}[]} & Record<string, unknown>};
+type Job = {id: string; owner_id: string; plan: Record<string, unknown>};
 
 class UserFacingError extends Error {}
 
@@ -49,20 +50,12 @@ function runRender(propsFile: string, outFile: string, onProgress: (pct: number)
 async function runJob(admin: SupabaseClient, job: Job) {
   let tmp: string | null = null;
   try {
-    const scenes = job.plan.scenes;
-    const wanted = scenes.flatMap((s) => [s.audioPath, s.imagePath]).filter((p): p is string => Boolean(p));
+    const wanted = collectPaths(job.plan);
     const urls = await signPaths(admin, wanted, 7200);
     if (wanted.some((p) => !urls.has(p))) {
       throw new UserFacingError('Some pictures or narration for this video are no longer available.');
     }
-    const plan = {
-      ...job.plan,
-      scenes: scenes.map((s) => ({
-        ...s,
-        audioUrl: s.audioPath ? urls.get(s.audioPath) : undefined,
-        imageUrl: s.imagePath ? urls.get(s.imagePath) : undefined,
-      })),
-    };
+    const plan = await signPlan(admin, job.plan, 7200);
 
     tmp = await mkdtemp(path.join(os.tmpdir(), 'imanovera-'));
     const propsFile = path.join(tmp, 'props.json');

@@ -1,10 +1,19 @@
+// 6a export route.ts
 import {NextResponse} from 'next/server';
 import {z} from 'zod';
 import {createClient} from '@/lib/supabase/server';
 import {processQueue} from '@/lib/renderQueue';
+import {collectPaths} from '@/lib/media';
 
-const mediaPath = z.string().regex(/^[0-9a-f-]{36}\/(audio|images)\/[0-9a-f-]{36}\.(mp3|jpg)$/);
+const mediaPath = z.string().regex(/^[0-9a-f-]{36}\/(audio|images|photos)\/[0-9a-f-]{36}\.(mp3|jpg)$/);
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+const layer = z.object({
+  id: z.string().max(40),
+  type: z.literal('image'),
+  fit: z.enum(['contain', 'cover']),
+  path: mediaPath,
+});
 
 const Input = z.object({
   plan: z.object({
@@ -12,6 +21,7 @@ const Input = z.object({
     fps: z.literal(30),
     width: z.literal(1280),
     height: z.literal(720),
+    starter: z.enum(['explainer', 'business']).optional(),
     scenes: z
       .array(
         z.object({
@@ -24,6 +34,7 @@ const Input = z.object({
           textColor: hex,
           audioPath: mediaPath.optional(),
           imagePath: mediaPath.optional(),
+          layers: z.array(layer).max(4).optional(),
         }),
       )
       .min(1)
@@ -43,7 +54,7 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({error: 'Please sign in.'}, {status: 401});
 
   // Users may only export their own files.
-  const paths = parsed.data.plan.scenes.flatMap((s) => [s.audioPath, s.imagePath]).filter(Boolean) as string[];
+  const paths = collectPaths(parsed.data.plan as Record<string, unknown>);
   if (paths.some((p) => !p.startsWith(`${user.id}/`))) {
     return NextResponse.json({error: 'Some media in this video is not available.'}, {status: 400});
   }

@@ -1,48 +1,114 @@
-'use client';
+// 6a VideoFromPlan.tsx
 import {AbsoluteFill, Html5Audio, Img, Sequence, interpolate, useCurrentFrame} from 'remotion';
 import type {Plan, Scene} from './plan';
 
-const SceneView = ({scene, frames}: {scene: Scene; frames: number}) => {
+const SceneView: React.FC<{scene: Scene; durationInFrames: number}> = ({scene, durationInFrames}) => {
   const frame = useCurrentFrame();
-  const fadeIn = interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'});
-  const fadeOut = interpolate(frame, [frames - 10, frames], [1, 0], {extrapolateLeft: 'clamp'});
-  const opacity = Math.min(fadeIn, fadeOut);
-  const rise = interpolate(frame, [0, 15], [40, 0], {extrapolateRight: 'clamp'});
-  const zoom = interpolate(frame, [0, frames], [1, 1.08], {extrapolateRight: 'clamp'});
+  const photo = scene.layers?.find((l) => l.type === 'image' && l.url);
+  const fullPicture = !photo && scene.imageUrl ? scene.imageUrl : null;
+
+  const zoom = interpolate(frame, [0, Math.max(1, durationInFrames)], [1, photo ? 1.05 : 1.08]);
+  const fade = interpolate(frame, [0, 15], [0, 1], {extrapolateRight: 'clamp'});
+  const rise = interpolate(frame, [0, 15], [24, 0], {extrapolateRight: 'clamp'});
 
   return (
-    <AbsoluteFill style={{background: scene.background, justifyContent: 'center', alignItems: 'center', fontFamily: 'Arial, sans-serif'}}>
-      {scene.audioUrl && <Html5Audio src={scene.audioUrl} />}
-      {scene.imageUrl && (
+    <AbsoluteFill
+      style={{
+        backgroundColor: scene.background,
+        fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+      }}
+    >
+      {fullPicture && (
         <>
-          <Img
-            src={scene.imageUrl}
-            style={{position: 'absolute', width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${zoom})`}}
-          />
-          <AbsoluteFill style={{background: 'rgba(0,0,0,0.2)'}} />
+          <AbsoluteFill style={{overflow: 'hidden'}}>
+            <Img
+              src={fullPicture}
+              style={{width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${zoom})`}}
+            />
+          </AbsoluteFill>
+          <AbsoluteFill style={{backgroundColor: 'rgba(0,0,0,0.2)'}} />
         </>
       )}
-      <div style={{opacity, transform: `translateY(${rise}px)`, color: scene.textColor, fontSize: 72, fontWeight: 700, textAlign: 'center', padding: '0 80px', textShadow: '0 2px 12px rgba(0,0,0,0.6)'}}>
+
+      {photo?.url && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 60,
+            right: 60,
+            top: 110,
+            bottom: 150,
+            overflow: 'hidden',
+            borderRadius: 16,
+            backgroundColor: 'rgba(255,255,255,0.06)',
+          }}
+        >
+          <Img
+            src={photo.url}
+            style={{width: '100%', height: '100%', objectFit: photo.fit, transform: `scale(${zoom})`}}
+          />
+        </div>
+      )}
+
+      <div
+        style={{
+          position: 'absolute',
+          left: 60,
+          right: 60,
+          top: photo ? 28 : 36,
+          textAlign: 'center',
+          color: scene.textColor,
+          fontSize: 52,
+          fontWeight: 800,
+          opacity: fade,
+          transform: `translateY(${rise}px)`,
+          textShadow: '0 2px 12px rgba(0,0,0,0.6)',
+        }}
+      >
         {scene.title}
       </div>
-      <div style={{position: 'absolute', bottom: 60, left: 80, right: 80, opacity, textAlign: 'center', color: scene.textColor, fontSize: 36, background: 'rgba(0,0,0,0.45)', borderRadius: 16, padding: '16px 24px'}}>
-        {scene.narration}
+
+      <div
+        style={{
+          position: 'absolute',
+          left: 80,
+          right: 80,
+          bottom: 30,
+          display: 'flex',
+          justifyContent: 'center',
+        }}
+      >
+        <span
+          style={{
+            color: '#ffffff',
+            fontSize: 28,
+            lineHeight: 1.3,
+            textAlign: 'center',
+            padding: '10px 20px',
+            borderRadius: 14,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+          }}
+        >
+          {scene.narration}
+        </span>
       </div>
+
+      {scene.audioUrl && <Html5Audio src={scene.audioUrl} />}
     </AbsoluteFill>
   );
 };
 
-export const VideoFromPlan = ({plan}: {plan: Plan}) => {
-  let start = 0;
+export const VideoFromPlan: React.FC<{plan: Plan}> = ({plan}) => {
+  let from = 0;
   return (
     <AbsoluteFill>
       {plan.scenes.map((scene) => {
-        const frames = Math.round(scene.durationSec * plan.fps);
-        const from = start;
-        start += frames;
+        const durationInFrames = Math.max(1, Math.round(scene.durationSec * plan.fps));
+        const start = from;
+        from += durationInFrames;
         return (
-          <Sequence key={scene.id} from={from} durationInFrames={frames}>
-            <SceneView scene={scene} frames={frames} />
+          <Sequence key={scene.id} from={start} durationInFrames={durationInFrames}>
+            <SceneView scene={scene} durationInFrames={durationInFrames} />
           </Sequence>
         );
       })}

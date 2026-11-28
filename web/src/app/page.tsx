@@ -236,7 +236,17 @@ export default function Home() {
       setStarting(false);
     }
   }
-
+  async function downloadVideo() {
+    if (!jobId) return;
+    setError('');
+    try {
+      const s = await callApi<ExportPoll>(`/api/export/${jobId}`);
+      if (!s.videoUrl) throw new Error('The video is not ready yet.');
+      window.location.href = s.videoUrl;
+    } catch (e) {
+      setError(message(e));
+    }
+  }
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-3xl font-bold">Imanovera</h1>
@@ -334,11 +344,11 @@ export default function Home() {
           >
             {exporting ? 'Exporting…' : 'Export MP4'}
           </button>
-          {videoUrl && (
+                    {videoUrl && (
             <p className="mt-3">
-              <a className="font-semibold text-blue-700 underline" href={videoUrl} download>
+              <button className="font-semibold text-blue-700 underline" onClick={downloadVideo}>
                 Download your video
-              </a>
+              </button>
             </p>
           )}
           <ol className="mt-6 space-y-3">
